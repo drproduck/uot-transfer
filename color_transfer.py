@@ -2,7 +2,6 @@
 import torch
 import numpy as np
 import matplotlib.pylab as plt
-import ot
 from codebase.OT import sampling_sinkhorn_divergence
 from codebase.UOT import sampling_sinkhorn_uot
 from transfer import transfer_with_map
