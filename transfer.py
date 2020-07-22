@@ -2,6 +2,7 @@ import torch
 import numpy as np
 from codebase.distance import batch_eudist_sq
 import pdb
+import time
 
 
 def transfer_with_map(xt, S, Xs=None, xs=None, batch_size=128):
@@ -33,29 +34,32 @@ def transfer_with_map(xt, S, Xs=None, xs=None, batch_size=128):
         transp_Xs = transp @ xt
 
     else:
-        # perform out of sample mapping
-        indices = torch.arange(Xs.shape[0])
-        batch_ind = [
-            indices[i:i + batch_size]
-            for i in range(0, len(indices), batch_size)]
-
         # transport the source samples
-        transp = S / torch.sum(S, 1, keepdim=True)
-        transp[~ torch.isfinite(transp)] = 0
-        transp_xs = transp @ xt
-
+        n = S.shape[0]
+        marg = torch.ones((n, 1)).to(0) / n
+        rowsum = torch.sum(S, dim=-1, keepdim=True)
+        remainder = marg - rowsum
+        print(remainder)
+        transp_xs = (remainder * xs + S @ xt) / marg
+        
         transp_Xs = []
-        for bi in batch_ind:
+        # perform out-of-sample mapping
+        idx = 0
+        while idx < Xs.shape[0]:
             # get the nearest neighbor in the source domain
-            D0 = batch_eudist_sq(Xs[bi], xs)
-            idx = torch.argmin(D0, -1)
-
+            next_idx = np.min([idx + batch_size, Xs.shape[0]])
+            Xs_b = Xs[idx:next_idx]
+            time_s = time.time()
+            Xs_b = Xs_b.to(0)
+            D0 = batch_eudist_sq(Xs_b, xs)
+            min_idx = torch.argmin(D0, -1)
 
             # define the transported points
-            transp_Xs_b = transp_xs[idx, :] + Xs[bi] - xs[idx, :]
-
+            transp_Xs_b = transp_xs[min_idx, :] + Xs_b - xs[min_idx, :]
             transp_Xs.append(transp_Xs_b)
-
+            
+            idx = next_idx
+            
         transp_Xs = torch.cat(transp_Xs, dim=0)
 
     return transp_Xs

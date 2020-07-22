@@ -6,15 +6,16 @@ import ot
 from codebase.OT import sampling_sinkhorn_divergence
 from codebase.UOT import sampling_sinkhorn_uot
 from transfer import transfer_with_map
+import time
+from skimage.exposure import equalize_adapthist
 
 # from skimage.io import imread
 # from gSLICrPy import __get_CUDA_gSLICr__, CUDA_gSLICr
 import colorsys
 from PIL import Image
 
-r = np.random.RandomState(42)
-
-method = 'uot'
+from skimage.segmentation import slic 
+r = np.random.RandomState(1000)
 
 def im2mat(img):
     """Converts an image to matrix (one pixel per line)"""
@@ -33,88 +34,61 @@ def denormalize_hsv(imgarr):
     imgarr[2] = np.uint8(imgarr[2] * 255)
     return imgarr
 
+def denormalize_rgb(imgarr):
+    return np.uint8(imgarr * 255)
+
 def mat2im(X, shape):
     """Converts back a matrix to an image"""
     return X.reshape(shape)
 
-
 def minmax(img):
     return np.clip(img, 0, 1)
 
+def img2tensor(img_raw):
+    return torch.from_numpy(im2mat(img_raw.astype(np.float32) / 255))
 
-##############################################################################
-# Generate data
-# -------------
-
-# Loading images
-# I1 = plt.imread('data_pot/ocean_day.jpg').astype(np.float64) / 256
-# I2 = plt.imread('data_pot/ocean_sunset.jpg').astype(np.float64) / 256
-
-# I1 = plt.imread('data_pot/city_night.jpg').astype(np.float64)
-# I2 = plt.imread('data_pot/city_day.jpg').astype(np.float64)
-
-I1 = np.array(Image.open('data_pot/city_night.jpg', mode='RGB').convert('HSV'), dtype=np.float32)
-I2 = np.array(Image.open('data_pot/city_day.jpg', mode='RGB').convert('HSV'), dtype=np.float32)
-
-I1 = normalize_hsv(I1) # should be in [0,1]
-I2 = normalize_hsv(I2)
-
-X1 = torch.from_numpy(im2mat(I1)).cuda()
-X2 = torch.from_numpy(im2mat(I2)).cuda()
-
-# training sampltes
-nb = 10000
-idx1 = r.randint(X1.shape[0], size=(nb,))
-idx2 = r.randint(X2.shape[0], size=(nb,))
-
-Xs = X1[idx1, :]
-Xt = X2[idx2, :]
+def sample_pixel(img_tensor):
+    idx = r.randint(img_tensor.shape[0], size=(nb,))
+    return img_tensor[idx].to(0)
 
 
+def color_transfer(img1, img2, method='uot', nb=10000):
 
-##############################################################################
-# Instantiate the different transport algorithms and fit them
-# -----------------------------------------------------------
+    print(img1.shape, img2.shape)
+    time_s = time.time()
+    img1_tensor = img2tensor(img1)
+    img2_tensor = img2tensor(img2)
+    print(f'convert elapsed={time.time() - time_s:.3f}')
 
+    # training samples
+    idx1 = r.randint(img1_tensor.shape[0], size=(nb,))
+    idx2 = r.randint(img2_tensor.shape[0], size=(nb,))
 
-# SinkhornTransport
+    time_s = time.time()
+    img1_sampled = img1_tensor[idx1, :].to(0)
+    img2_sampled = img2_tensor[idx2, :].to(0)
+    print(f'sampling elapsed={time.time() - time_s:.3f}')
 
-if method == 'ot':
-    _, P = sampling_sinkhorn_divergence(Xs, Xt, ret_plan=True)
-elif method == 'uot':
-    P = sampling_sinkhorn_uot(Xs, Xt, eta=0.1, t1=1., t2=1., n_iter=100)
+    ##############################################################################
+    # Instantiate the different transport algorithms and fit them
+    # -----------------------------------------------------------
 
-# prediction between images (using out of sample prediction as in [6])
-transp_Xs = transfer_with_map(Xt, P, X1, Xs)
+    # SinkhornTransport
 
-transp_Xs = transp_Xs.detach().cpu().numpy()
-I1te = minmax(mat2im(transp_Xs, I1.shape))
+    time_s = time.time()
+    if method == 'ot':
+        _, P = sampling_sinkhorn_divergence(img1_sampled, img2_sampled, eta=0.01, ret_plan=True)
+    elif method == 'uot':
+        P = sampling_sinkhorn_uot(img1_sampled, img2_sampled, eta=0.01, t1=10., t2=1., n_iter=100)
 
-##############################################################################
-# Plot new images
-# ---------------
+    print(f'sinkhorn elapsed={time.time() - time_s:.3f}')
 
-def torgbarray(img):
-    return np.array(Image.fromarray(denormalize_hsv(img), mode='HSV').convert('RGB')) / 255
+    time_s = time.time()
+    # prediction between images (using out of sample prediction as in [6])
+    transp_Xs = transfer_with_map(img2_sampled, P, img1_tensor, img1_sampled, batch_size=10000)
+    print(f'transfer elapsed={time.time() - time_s:.3f}')
 
-plt.figure(figsize=(16, 8))
-
-plt.subplot(2, 3, 1)
-plt.imshow(torgbarray(I1))
-plt.axis('off')
-plt.title('Image 1')
-
-plt.subplot(2, 3, 2)
-plt.imshow(torgbarray(I2))
-plt.axis('off')
-plt.title('Image 2')
-
-plt.subplot(2, 3, 3)
-plt.imshow(torgbarray(I1te))
-plt.axis('off')
-plt.title('Image 1 Adapt (reg)')
-
-plt.tight_layout()
-
-plt.savefig(f'hello_{method}.png')
-
+    transp_Xs = transp_Xs.detach().cpu().numpy()
+    img1_transformed = minmax(mat2im(transp_Xs, img1.shape))
+    
+    return img1_transformed
