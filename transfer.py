@@ -39,18 +39,22 @@ def transfer_with_map(xt, S, Xs=None, xs=None, batch_size=128):
         marg = torch.ones((n, 1)).to(0) / n
         rowsum = torch.sum(S, dim=-1, keepdim=True)
         remainder = marg - rowsum
-        print(remainder)
         transp_xs = (remainder * xs + S @ xt) / marg
         
         transp_Xs = []
         # perform out-of-sample mapping
         idx = 0
+        
+        time_mv2gpu = 0
         while idx < Xs.shape[0]:
             # get the nearest neighbor in the source domain
             next_idx = np.min([idx + batch_size, Xs.shape[0]])
             Xs_b = Xs[idx:next_idx]
+            
             time_s = time.time()
             Xs_b = Xs_b.to(0)
+            time_mv2gpu += time.time() - time_s
+            
             D0 = batch_eudist_sq(Xs_b, xs)
             min_idx = torch.argmin(D0, -1)
 
@@ -62,4 +66,4 @@ def transfer_with_map(xt, S, Xs=None, xs=None, batch_size=128):
             
         transp_Xs = torch.cat(transp_Xs, dim=0)
 
-    return transp_Xs
+    return transp_Xs, time_mv2gpu

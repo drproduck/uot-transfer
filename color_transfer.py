@@ -52,12 +52,11 @@ def sample_pixel(img_tensor):
 
 
 def color_transfer(img1, img2, method='uot', nb=10000):
-
-    print(img1.shape, img2.shape)
-    time_s = time.time()
+    print(f'size 1 = {img1.shape}, size 2 = {img2.shape}')
+    time_mv2gpu = 0.
+    time_total = time.time()
     img1_tensor = img2tensor(img1)
     img2_tensor = img2tensor(img2)
-    print(f'convert elapsed={time.time() - time_s:.3f}')
 
     # training samples
     idx1 = r.randint(img1_tensor.shape[0], size=(nb,))
@@ -66,28 +65,22 @@ def color_transfer(img1, img2, method='uot', nb=10000):
     time_s = time.time()
     img1_sampled = img1_tensor[idx1, :].to(0)
     img2_sampled = img2_tensor[idx2, :].to(0)
-    print(f'sampling elapsed={time.time() - time_s:.3f}')
-
-    ##############################################################################
-    # Instantiate the different transport algorithms and fit them
-    # -----------------------------------------------------------
+    time_mv2gpu += time.time() - time_s
 
     # SinkhornTransport
 
-    time_s = time.time()
     if method == 'ot':
         _, P = sampling_sinkhorn_divergence(img1_sampled, img2_sampled, eta=0.01, ret_plan=True)
     elif method == 'uot':
         P = sampling_sinkhorn_uot(img1_sampled, img2_sampled, eta=0.01, t1=10., t2=1., n_iter=100)
 
-    print(f'sinkhorn elapsed={time.time() - time_s:.3f}')
-
-    time_s = time.time()
     # prediction between images (using out of sample prediction as in [6])
-    transp_Xs = transfer_with_map(img2_sampled, P, img1_tensor, img1_sampled, batch_size=10000)
-    print(f'transfer elapsed={time.time() - time_s:.3f}')
+    transp_Xs, time_mv2gpu_transfer = transfer_with_map(img2_sampled, P, img1_tensor, img1_sampled, batch_size=10000)
+    time_mv2gpu += time_mv2gpu_transfer
 
     transp_Xs = transp_Xs.detach().cpu().numpy()
     img1_transformed = minmax(mat2im(transp_Xs, img1.shape))
     
-    return img1_transformed
+    time_total = time.time() - time_total
+    
+    return img1_transformed, time_total, time_mv2gpu

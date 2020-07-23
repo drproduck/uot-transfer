@@ -7,6 +7,8 @@ from codebase.UOT import sampling_sinkhorn_uot
 from transfer import transfer_with_map
 import time
 from skimage.exposure import equalize_adapthist
+from color_transfer import color_transfer
+from codebase.torchutils import check_nan_inf
 
 # from skimage.io import imread
 # from gSLICrPy import __get_CUDA_gSLICr__, CUDA_gSLICr
@@ -46,7 +48,7 @@ def mat2im(X, shape):
     return X.reshape(shape)
 
 def minmax(img):
-    return np.clip(img, 0, 1)
+    return np.clip(img, 0, 1) * 255
 
 def img2tensor(img_raw):
     return torch.from_numpy(im2mat(img_raw.astype(np.float32) / 255))
@@ -56,73 +58,64 @@ def sample_pixel(img_tensor):
     return img_tensor[idx].to(0)
 
 ##############################################################################
-# Generate data
-# -------------
-# img1 = 'data_pot/city_day.jpg'
-vid1_path = 'oxford_scene_drone.mp4'
+fourcc = cv2.VideoWriter_fourcc(*'mp4v')
+vid1_path = 'oxford_short.mp4'
 img2_path = 'data_pot/city_night.jpg'
 
-time_s = time.time()
 vid1_raw = cv2.VideoCapture(vid1_path)
-img2_raw = plt.imread(img2)
-print(f'loading elapsed={time.time() - time_s:.3f}')
+img2_raw = plt.imread(img2_path)
 
-time_s = time.time()
+_, img_test = vid1_raw.read()
+height, width, _ = img_test.shape
+print(height, width)
+video = cv2.VideoWriter('output.mp4', fourcc, 25, (width, height))
+
 img2_tensor = img2tensor(img2_raw)
 img2_sampled = sample_pixel(img2_tensor)
-
-for _, img1_raw in vid1_raw:
+t = 0
+while True:
+    time_frame = time.time()
+    time_mv2gpu = 0
+    t += 1
+    ret, img1_raw = vid1_raw.read()
+    if ret is False: break
+        
     img1_tensor = img2tensor(img1_raw)
-    img1_sampled = sample_pixel(img1_tensor)
     
+    time_s = time.time()
+    img1_sampled = sample_pixel(img1_tensor)
+    time_mv2gpu += time.time() - time_s
+    # SinkhornTransport
+
     if method == 'ot':
         _, P = sampling_sinkhorn_divergence(img1_sampled, img2_sampled, eta=0.01, ret_plan=True)
     elif method == 'uot':
-        P = sampling_sinkhorn_uot(img1_sampled, img2_sampled, eta=0.01, t1=10., t2=1., n_iter=100)
+        P = sampling_sinkhorn_uot(img1_sampled, img2_sampled, eta=0.01, t1=100., t2=1., n_iter=100)
+        
+    try:
+        check_nan_inf(P, stop=True)
+    except Exception:
+        print(f'skipped frame {t}')
+        continue
+        
+    # prediction between images (using out of sample prediction as in [6])
+    transp_Xs, time_mv2gpu_transfer = transfer_with_map(img2_sampled, P, img1_tensor, img1_sampled, batch_size=100000)
+    time_mv2gpu += time_mv2gpu_transfer
+    
+    transp_Xs = transp_Xs.detach().cpu().numpy()
+    img1_transformed = minmax(mat2im(transp_Xs, img1_raw.shape))
+    
+    video.write(np.uint8(img1_transformed))
+    
+    print(f'frame {t} - time total = {time.time() - time_frame:.3f} s, time spent moving data to gpu = {time_mv2gpu:.3f} s')
 
-print(f'sinkhorn elapsed={time.time() - time_s:.3f}')
+cv2.destroyAllWindows()
+video.release()
 
-time_s = time.time()
-# prediction between images (using out of sample prediction as in [6])
-transp_Xs = transfer_with_map(img2_sampled, P, img1_tensor, img1_sampled, batch_size=100000)
-print(f'transfer elapsed={time.time() - time_s:.3f}')
+# def path2name(path_img):
+#     name = os.path.splitext(path_img)[0]
+#     return name.split('/')[1]
 
-transp_Xs = transp_Xs.detach().cpu().numpy()
-img1_transformed = minmax(mat2im(transp_Xs, img1_raw.shape))
-
-# I1te = denormalize_rgb(I1te)
-# I1te = np.array(equalize_adapthist(Image.fromarray(I1te, mode='RGB'))) / 255
-# I1te = equalize_adapthist(I1te)
-
-##############################################################################
-# Plot new images
-# ---------------
-
-# plt.figure(figsize=(16, 8))
-
-# plt.subplot(2, 3, 1)
-# plt.imshow(I1)
-# plt.axis('off')
-# plt.title('Image 1')
-
-# plt.subplot(2, 3, 2)
-# plt.imshow(I2)
-# plt.axis('off')
-# plt.title('Image 2')
-
-# plt.subplot(2, 3, 3)
-# plt.imshow(I1te)
-# plt.axis('off')
-# plt.title('Image 1 Adapt (reg)')
-
-# plt.tight_layout()
-
-import os
-
-def path2name(path_img):
-    name = os.path.splitext(path_img)[0]
-    return name.split('/')[1]
-
-plt.savefig(f'color_transfer_{method}_source={path2name(img1)}_target={path2name(img2)}.png')
-plt.savefig(f'color_transfer_{method}_source={path2name(img1)}_target={path2name(img2)}.png')
+# plt.savefig(f'color_transfer_{method}_source={path2name(img1)}_target={path2name(img2)}.png')
+# plt.savefig(f'color_transfer_{method}_source={path2name(img1)}_target={path2name(img2)}.png')
 
