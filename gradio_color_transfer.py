@@ -2,7 +2,7 @@ import gradio as gr
 from color_transfer import color_transfer
 
 def transfer(img1, img2):
-    img1_transformed = color_transfer(img1, img2)
+    img1_transformed, _ = color_transfer(img1, img2)
     return img1_transformed
 
 gr.Interface(
