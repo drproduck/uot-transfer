@@ -6,14 +6,12 @@ from codebase.OT import sampling_sinkhorn_divergence
 from codebase.UOT import sampling_sinkhorn_uot
 from transfer import transfer_with_map
 import time
-from skimage.exposure import equalize_adapthist
+# from skimage.exposure import equalize_adapthist
 
 # from skimage.io import imread
 # from gSLICrPy import __get_CUDA_gSLICr__, CUDA_gSLICr
-import colorsys
 from PIL import Image
-
-from skimage.segmentation import slic 
+# from skimage.segmentation import slic 
 r = np.random.RandomState(1000)
 
 def im2mat(img):

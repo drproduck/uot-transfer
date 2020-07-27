@@ -9,12 +9,10 @@ import torch
 import numpy as np
 import matplotlib.pylab as plt
 import time
-from skimage.exposure import equalize_adapthist
+import cv2
 import colorsys
 from PIL import Image
-# from skimage.segmentation import slic 
-r = np.random.RandomState(1000)
-
+r = np.random.RandomState(1000) 
 
 ##############################################################################
 # Generate data
@@ -24,8 +22,10 @@ img2 = 'data_pot/imageB.jpg'
 
 time_s = time.time()
 # Loading images
-img1_raw = plt.imread(img1)
-img2_raw = plt.imread(img2)
+img1_raw = cv2.imread(img1)
+img2_raw = cv2.imread(img2)
+
+print(type(img1_raw), img1_raw.dtype)
 
 method = 'uot'
 img1_transformed, time_total, time_mv2gpu = color_transfer(img1_raw, img2_raw, method=method, nb=10000)

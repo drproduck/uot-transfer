@@ -35,11 +35,21 @@ def transfer_with_map(xt, S, Xs=None, xs=None, batch_size=128):
 
     else:
         # transport the source samples
-        n = S.shape[0]
-        marg = torch.ones((n, 1)).to(0) / n
-        rowsum = torch.sum(S, dim=-1, keepdim=True)
-        remainder = marg - rowsum
-        transp_xs = (remainder * xs + S @ xt) / marg
+        # n = S.shape[0]
+        # marg = torch.ones((n, 1)).to(0) / n
+        # rowsum = torch.sum(S, dim=-1, keepdim=True)
+        # remainder = marg - rowsum
+        # transp_xs = (remainder * xs + S @ xt) / marg
+
+        # perform standard barycentric mapping
+        transp = S / torch.sum(S, dim=-1, keepdim=True)
+
+        # set nans to 0
+        transp[~ torch.isfinite(transp)] = 0
+
+        # compute transported samples
+        transp_xs = transp @ xt
+
         
         transp_Xs = []
         # perform out-of-sample mapping
